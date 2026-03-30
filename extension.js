@@ -6,6 +6,7 @@ import { Slider } from 'resource:///org/gnome/shell/ui/slider.js';
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Clutter from 'gi://Clutter';
 import { ConfigHelper } from './configHelper.js';
 
 class DebounceTimer {
@@ -37,11 +38,20 @@ class DebounceTimer {
 
 const BrightnessIndicator = GObject.registerClass(
 class BrightnessIndicator extends PanelMenu.Button {
-    constructor(configHelper) {
+    constructor(configHelper, extension) {
         super(0.0, 'Brightness Manager', false);
         this._configHelper = configHelper;
+        this._extension = extension;
         this._configData = null;
         this._debounceTimers = [];
+
+        this.connect('button-press-event', (actor, event) => {
+            if (event.get_button() === 3 /* Right click */) {
+                this._extension.openPreferences();
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
 
         let icon = new St.Icon({
             icon_name: 'display-brightness-symbolic',
@@ -88,8 +98,8 @@ class BrightnessIndicator extends PanelMenu.Button {
                     
                     this.menu.addMenuItem(sliderItem);
 
-                    // Setup debouncer for this specific slider (delay 400ms)
-                    let timer = new DebounceTimer(400, (newValue) => {
+                    // Setup debouncer for this specific slider (delay 0ms for immediate response)
+                    let timer = new DebounceTimer(0, (newValue) => {
                         let actualValue = Math.round(min + (newValue * (max - min)));
                         sliderConfig.lastValue = actualValue;
                         
@@ -120,6 +130,13 @@ class BrightnessIndicator extends PanelMenu.Button {
             this._buildMenu();
         });
         this.menu.addMenuItem(detectItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        let settingsItem = new PopupMenu.PopupMenuItem('⚙️ Settings');
+        settingsItem.connect('activate', () => {
+            this._extension.openPreferences();
+        });
+        this.menu.addMenuItem(settingsItem);
     }
 
     destroy() {
@@ -134,7 +151,7 @@ class BrightnessIndicator extends PanelMenu.Button {
 export default class CustomBrightnessExtension extends Extension {
     enable() {
         this._configHelper = new ConfigHelper();
-        this._indicator = new BrightnessIndicator(this._configHelper);
+        this._indicator = new BrightnessIndicator(this._configHelper, this);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
     }
 
