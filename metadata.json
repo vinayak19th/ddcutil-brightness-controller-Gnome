@@ -1,7 +1,7 @@
 {
-  "name": "Custom Brightness Controller",
+  "name": "ddcutil Brightness Controller",
   "description": "Multi-monitor and multi-bar custom slider controllers using ddcutil.",
-  "uuid": "custom-brightness-controller@user.local",
+  "uuid": "ddcutil-brightness-controller@user.local",
   "shell-version": [
     "45",
     "46",
