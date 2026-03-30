@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-EXT_NAME="custom-brightness-controller@user.local"
+EXT_NAME="ddcutil-brightness-controller@user.local"
 ZIP_NAME="$EXT_NAME.shell-extension.zip"
 
 echo "Packing Custom Brightness Controller extension..."

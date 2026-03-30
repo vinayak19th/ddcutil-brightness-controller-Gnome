@@ -30,17 +30,9 @@ export default class BrightnessPrefs extends ExtensionPreferences {
         });
         page.add(monitorsGroup);
         
-        let _saveTimeoutId = null;
-        const saveConfig = () => {
-            if (_saveTimeoutId) {
-                GLib.source_remove(_saveTimeoutId);
-            }
-            _saveTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
-                this._configHelper.saveConfig(this._currentConfig);
-                _saveTimeoutId = null;
-                return GLib.SOURCE_REMOVE;
-            });
-        };
+        // We no longer auto-save to prevent IO hangs and load delay cascading.
+        // We defer to the Save and Cancel buttons at the bottom of the window.
+        const saveConfig = () => {};
 
         const createSliderRow = (monitor, slider, sliderIndex, sliderParentExpander) => {
             let sliderRow = new Adw.ExpanderRow({ title: `Slider: ${slider.name || 'Unnamed'}` });
@@ -145,6 +137,25 @@ export default class BrightnessPrefs extends ExtensionPreferences {
         // Place the add monitor button row in its own generic group at bottom
         const bottomGroup = new Adw.PreferencesGroup();
         bottomGroup.add(addMonitorBtnRow);
+        
+        const actionRow = new Adw.ActionRow({ title: 'Save or Discard Changes' });
+        
+        const saveBtn = new Gtk.Button({ label: 'Save', valign: Gtk.Align.CENTER });
+        saveBtn.add_css_class('suggested-action');
+        saveBtn.connect('clicked', () => {
+             this._configHelper.saveConfig(this._currentConfig);
+             window.close();
+        });
+        actionRow.add_suffix(saveBtn);
+        
+        const cancelBtn = new Gtk.Button({ label: 'Cancel', valign: Gtk.Align.CENTER });
+        cancelBtn.connect('clicked', () => {
+             window.close();
+        });
+        actionRow.add_suffix(cancelBtn);
+        
+        bottomGroup.add(actionRow);
+        
         page.add(bottomGroup);
 
         this._configHelper.loadConfig().then(configData => {
