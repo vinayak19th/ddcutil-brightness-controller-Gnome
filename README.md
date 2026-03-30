@@ -2,6 +2,16 @@
 
 A GNOME Shell extension developed to precisely control your multiple monitors brightness levels via `ddcutil`.
 
+![Extension UI Preview](images/Dock.png)
+
+## Screenshots
+
+### Extension Settings
+<p align="center">
+  <img src="images/Settings.png" width="45%" />
+  <img src="images/Settings-2.png" width="45%" />
+</p>
+
 ## Features
 * Multiple sliders per monitor supported natively.
 * Persistence: Remembers your last configured brightness state across reloads.
