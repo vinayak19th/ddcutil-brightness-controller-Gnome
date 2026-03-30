@@ -1,11 +1,12 @@
 {
+  "uuid": "ddcutil-brightness-controller@user.local",
   "name": "ddcutil Brightness Controller",
   "description": "Multi-monitor and multi-bar custom slider controllers using ddcutil.",
-  "uuid": "ddcutil-brightness-controller@user.local",
   "shell-version": [
     "45",
     "46",
     "47"
   ],
-  "url": "https://github.com/user/brightness_controller"
+  "url": "https://github.com/user/brightness_controller",
+  "version-name": "1.0"
 }

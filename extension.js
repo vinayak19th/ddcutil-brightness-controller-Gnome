@@ -1,14 +1,30 @@
-import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+/* extension.js - ddcutil Brightness Controller
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+/* GI Libraries */
+import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
+import St from 'gi://St';
+
+/* GNOME Shell modules */
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import { Slider } from 'resource:///org/gnome/shell/ui/slider.js';
-import St from 'gi://St';
-import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
-import Clutter from 'gi://Clutter';
-import { ConfigHelper } from './configHelper.js';
+import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 
+/* Extension modules */
+import {ConfigHelper} from './configHelper.js';
+
+
+/**
+ * A simple debounce timer that coalesces rapid calls into a single
+ * deferred invocation. Used to avoid excessive ddcutil subprocess
+ * spawns while a slider is being dragged.
+ */
 class DebounceTimer {
     constructor(timeout, callback) {
         this._timeout = timeout;
@@ -36,10 +52,15 @@ class DebounceTimer {
     }
 }
 
+
+/**
+ * Panel indicator button that displays per-monitor brightness/contrast
+ * sliders in a popup menu.
+ */
 const BrightnessIndicator = GObject.registerClass(
 class BrightnessIndicator extends PanelMenu.Button {
-    constructor(configHelper, extension) {
-        super(0.0, 'Brightness Manager', false);
+    _init(configHelper, extension) {
+        super._init(0.0, 'Brightness Manager', false);
         this._configHelper = configHelper;
         this._extension = extension;
         this._configData = null;
@@ -53,7 +74,7 @@ class BrightnessIndicator extends PanelMenu.Button {
             return Clutter.EVENT_PROPAGATE;
         });
 
-        let icon = new St.Icon({
+        const icon = new St.Icon({
             icon_name: 'display-brightness-symbolic',
             style_class: 'system-status-icon',
         });
@@ -66,47 +87,64 @@ class BrightnessIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupMenuItem('Loading config...'));
 
         this._configData = await this._configHelper.loadConfig();
-        
+
         this.menu.removeAll();
 
         if (!this._configData.monitors || this._configData.monitors.length === 0) {
-            this.menu.addMenuItem(new PopupMenu.PopupMenuItem('No monitors found in config'));
+            this.menu.addMenuItem(
+                new PopupMenu.PopupMenuItem('No monitors found in config')
+            );
             return;
         }
 
-        for (let monitor of this._configData.monitors) {
-            let header = new PopupMenu.PopupMenuItem(`[Display ${monitor.displayId}] ${monitor.id}`);
-            header.sensitive = false; // Make it look just like a label
+        for (const monitor of this._configData.monitors) {
+            const header = new PopupMenu.PopupMenuItem(
+                `[Display ${monitor.displayId}] ${monitor.id}`
+            );
+            header.sensitive = false;
             this.menu.addMenuItem(header);
 
             if (monitor.sliders) {
-                for (let sliderConfig of monitor.sliders) {
-                    let min = sliderConfig.min !== undefined ? sliderConfig.min : 0;
-                    let max = sliderConfig.max !== undefined ? sliderConfig.max : 100;
-                    let val = sliderConfig.lastValue !== undefined ? sliderConfig.lastValue : 50;
-                    
-                    let labelItem = new PopupMenu.PopupMenuItem(`${sliderConfig.name}`);
+                for (const sliderConfig of monitor.sliders) {
+                    const min = sliderConfig.min !== undefined
+                        ? sliderConfig.min : 0;
+                    const max = sliderConfig.max !== undefined
+                        ? sliderConfig.max : 100;
+                    const val = sliderConfig.lastValue !== undefined
+                        ? sliderConfig.lastValue : 50;
+
+                    const labelItem = new PopupMenu.PopupMenuItem(
+                        `${sliderConfig.name}`
+                    );
                     labelItem.sensitive = false;
                     this.menu.addMenuItem(labelItem);
 
                     // GNOME sliders use 0.0 to 1.0 range
-                    let normalizedValue = (val - min) / (max - min);
-                    let sliderItem = new PopupMenu.PopupBaseMenuItem({ activate: false });
-                    let slider = new Slider(normalizedValue);
+                    const normalizedValue = (val - min) / (max - min);
+                    const sliderItem = new PopupMenu.PopupBaseMenuItem({
+                        activate: false,
+                    });
+                    const slider = new Slider(normalizedValue);
                     slider.x_expand = true;
                     sliderItem.add_child(slider);
-                    
+
                     this.menu.addMenuItem(sliderItem);
 
-                    // Setup debouncer for this specific slider (delay 0ms for immediate response)
-                    let timer = new DebounceTimer(0, (newValue) => {
-                        let actualValue = Math.round(min + (newValue * (max - min)));
+                    // Debouncer for this slider (0ms = immediate)
+                    const timer = new DebounceTimer(0, newValue => {
+                        const actualValue = Math.round(
+                            min + (newValue * (max - min))
+                        );
                         sliderConfig.lastValue = actualValue;
-                        
-                        this._configHelper.executeCommand(sliderConfig.command, actualValue, this._configData.ddcutilPath);
+
+                        this._configHelper.executeCommand(
+                            sliderConfig.command,
+                            actualValue,
+                            this._configData.ddcutilPath
+                        );
                         this._configHelper.saveConfig(this._configData);
                     });
-                    
+
                     this._debounceTimers.push(timer);
 
                     slider.connect('notify::value', () => {
@@ -116,23 +154,29 @@ class BrightnessIndicator extends PanelMenu.Button {
             }
             this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         }
-        let refreshItem = new PopupMenu.PopupMenuItem('Refresh UI Config');
+
+        const refreshItem = new PopupMenu.PopupMenuItem('Refresh UI Config');
         refreshItem.connect('activate', () => {
             this._buildMenu();
         });
         this.menu.addMenuItem(refreshItem);
 
-        let detectItem = new PopupMenu.PopupMenuItem('Reload Monitors (ddcutil detect)');
+        const detectItem = new PopupMenu.PopupMenuItem(
+            'Reload Monitors (ddcutil detect)'
+        );
         detectItem.connect('activate', async () => {
             this.menu.removeAll();
-            this.menu.addMenuItem(new PopupMenu.PopupMenuItem('Running ddcutil detect...'));
+            this.menu.addMenuItem(
+                new PopupMenu.PopupMenuItem('Running ddcutil detect...')
+            );
             await this._configHelper._generateDefaultConfig();
             this._buildMenu();
         });
         this.menu.addMenuItem(detectItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        let settingsItem = new PopupMenu.PopupMenuItem('⚙️ Settings');
+
+        const settingsItem = new PopupMenu.PopupMenuItem('⚙️ Settings');
         settingsItem.connect('activate', () => {
             this._extension.openPreferences();
         });
@@ -140,7 +184,7 @@ class BrightnessIndicator extends PanelMenu.Button {
     }
 
     destroy() {
-        for (let timer of this._debounceTimers) {
+        for (const timer of this._debounceTimers) {
             timer.destroy();
         }
         this._debounceTimers = [];
@@ -148,18 +192,35 @@ class BrightnessIndicator extends PanelMenu.Button {
     }
 });
 
-export default class CustomBrightnessExtension extends Extension {
+
+/**
+ * Main extension class.
+ *
+ * This function is called when your extension is enabled, which could be
+ * done in GNOME Extensions, when you log in or when the screen is unlocked.
+ *
+ * Anything created, modified or setup in enable() MUST be undone in
+ * disable(). Not doing so is the most common reason extensions are rejected
+ * during review.
+ */
+export default class BrightnessControllerExtension extends Extension {
+    /**
+     * Called when the extension is enabled.
+     * Creates the panel indicator and config helper.
+     */
     enable() {
         this._configHelper = new ConfigHelper();
         this._indicator = new BrightnessIndicator(this._configHelper, this);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
     }
 
+    /**
+     * Called when the extension is disabled.
+     * Destroys all objects created in enable().
+     */
     disable() {
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
-        }
+        this._indicator?.destroy();
+        this._indicator = null;
         this._configHelper = null;
     }
 }
