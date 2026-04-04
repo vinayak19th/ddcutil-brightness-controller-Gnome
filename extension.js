@@ -65,6 +65,7 @@ class BrightnessIndicator extends PanelMenu.Button {
         this._extension = extension;
         this._configData = null;
         this._debounceTimers = [];
+        this._sliderSignals = [];
 
         this.connect('button-press-event', (actor, event) => {
             if (event.get_button() === 3 /* Right click */) {
@@ -83,11 +84,22 @@ class BrightnessIndicator extends PanelMenu.Button {
         this._buildMenu();
     }
 
+    _disconnectSliders() {
+        if (this._sliderSignals) {
+            for (const {slider, signalId} of this._sliderSignals) {
+                if (slider && signalId)
+                    slider.disconnect(signalId);
+            }
+            this._sliderSignals = [];
+        }
+    }
+
     async _buildMenu() {
         this.menu.addMenuItem(new PopupMenu.PopupMenuItem('Loading config...'));
 
         this._configData = await this._configHelper.loadConfig();
 
+        this._disconnectSliders();
         this.menu.removeAll();
 
         if (!this._configData.monitors || this._configData.monitors.length === 0) {
@@ -147,9 +159,10 @@ class BrightnessIndicator extends PanelMenu.Button {
 
                     this._debounceTimers.push(timer);
 
-                    slider.connect('notify::value', () => {
+                    const signalId = slider.connect('notify::value', () => {
                         timer.trigger(slider.value);
                     });
+                    this._sliderSignals.push({slider, signalId});
                 }
             }
             this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -165,6 +178,7 @@ class BrightnessIndicator extends PanelMenu.Button {
             'Reload Monitors (ddcutil detect)'
         );
         detectItem.connect('activate', async () => {
+            this._disconnectSliders();
             this.menu.removeAll();
             this.menu.addMenuItem(
                 new PopupMenu.PopupMenuItem('Running ddcutil detect...')
@@ -184,6 +198,7 @@ class BrightnessIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._disconnectSliders();
         for (const timer of this._debounceTimers) {
             timer.destroy();
         }

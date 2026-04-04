@@ -31,6 +31,11 @@ export default class BrightnessPrefs extends ExtensionPreferences {
         this._configHelper = new ConfigHelper();
         this._currentConfig = {ddcutilPath: 'ddcutil', monitors: []};
 
+        window.connect('close-request', () => {
+            this._configHelper = null;
+            this._currentConfig = null;
+        });
+
         const page = new Adw.PreferencesPage();
         window.add(page);
 

@@ -49,7 +49,16 @@ export class ConfigHelper {
             return await this._generateDefaultConfig();
 
         try {
-            const [, contents] = file.load_contents(null);
+            const contents = await new Promise((resolve, reject) => {
+                file.load_contents_async(null, (obj, res) => {
+                    try {
+                        const [, contentBytes] = obj.load_contents_finish(res);
+                        resolve(contentBytes);
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+            });
             const decoder = new TextDecoder('utf-8');
             const data = decoder.decode(contents);
             const parsed = JSON.parse(data);
@@ -79,12 +88,21 @@ export class ConfigHelper {
             const encoder = new TextEncoder();
             const uint8Array = encoder.encode(contents);
 
-            file.replace_contents(
+            file.replace_contents_async(
                 uint8Array,
                 null,
                 false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION,
-                null
+                null,
+                (obj, res) => {
+                    try {
+                        obj.replace_contents_finish(res);
+                    } catch (e) {
+                        console.error(
+                            `[Brightness Controller] Error saving config: ${e.message}`
+                        );
+                    }
+                }
             );
         } catch (e) {
             console.error(
