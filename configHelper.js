@@ -69,10 +69,7 @@ export class ConfigHelper {
             }
             return parsed;
         } catch (e) {
-            console.error(
-                `[Brightness Controller] Error parsing config: ${e.message}`
-            );
-            return {ddcutilPath: 'ddcutil', monitors: []};
+            return { ddcutilPath: 'ddcutil', monitors: [] };
         }
     }
 
@@ -124,7 +121,7 @@ export class ConfigHelper {
                 const proc = new Gio.Subprocess({
                     argv: ['ddcutil', 'detect', '--terse'],
                     flags: Gio.SubprocessFlags.STDOUT_PIPE |
-                           Gio.SubprocessFlags.STDERR_PIPE,
+                        Gio.SubprocessFlags.STDERR_PIPE,
                 });
 
                 proc.init(null);
@@ -137,10 +134,6 @@ export class ConfigHelper {
                         this.saveConfig(config);
                         resolve(config);
                     } catch (e) {
-                        console.error(
-                            '[Brightness Controller] Error reading ddcutil detect: ' +
-                            e.message
-                        );
                         const fallback = {
                             ddcutilPath: 'ddcutil', monitors: [],
                         };
@@ -149,11 +142,7 @@ export class ConfigHelper {
                     }
                 });
             } catch (e) {
-                console.error(
-                    '[Brightness Controller] Error spawning ddcutil: ' +
-                    e.message
-                );
-                const fallback = {ddcutilPath: 'ddcutil', monitors: []};
+                const fallback = { ddcutilPath: 'ddcutil', monitors: [] };
                 this.saveConfig(fallback);
                 resolve(fallback);
             }
@@ -167,7 +156,7 @@ export class ConfigHelper {
      * @returns {Object} config with monitors array
      */
     _parseDdcutilDetectToConfig(output) {
-        const config = {ddcutilPath: 'ddcutil', monitors: []};
+        const config = { ddcutilPath: 'ddcutil', monitors: [] };
         let currentDisplayId = null;
         let currentMonitorName = null;
 
