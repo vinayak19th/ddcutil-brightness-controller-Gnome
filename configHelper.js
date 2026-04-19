@@ -38,8 +38,8 @@ export class ConfigHelper {
     }
 
     /**
-     * Load the config from disk. If the file does not exist, generate a
-     * default config by running `ddcutil detect --terse`.
+     * Load the config from disk. If the file does not exist, generate an
+     * initial config once by running `ddcutil detect --terse`.
      *
      * @returns {Promise<Object>} the parsed config object
      */

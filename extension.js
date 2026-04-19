@@ -10,14 +10,14 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 /* GNOME Shell modules */
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
+import { Slider } from 'resource:///org/gnome/shell/ui/slider.js';
 
 /* Extension modules */
-import {ConfigHelper} from './configHelper.js';
+import { ConfigHelper } from './configHelper.js';
 
 
 /**
@@ -52,160 +52,198 @@ class DebounceTimer {
     }
 }
 
+const COMMAND_DEBOUNCE_MS = 120;
+const CONFIG_SAVE_DEBOUNCE_MS = 750;
+
 
 /**
  * Panel indicator button that displays per-monitor brightness/contrast
  * sliders in a popup menu.
  */
 const BrightnessIndicator = GObject.registerClass(
-class BrightnessIndicator extends PanelMenu.Button {
-    _init(configHelper, extension) {
-        super._init(0.0, 'Brightness Manager', false);
-        this._configHelper = configHelper;
-        this._extension = extension;
-        this._configData = null;
-        this._debounceTimers = [];
-        this._sliderSignals = [];
-
-        this.connect('button-press-event', (actor, event) => {
-            if (event.get_button() === 3 /* Right click */) {
-                this._extension.openPreferences();
-                return Clutter.EVENT_STOP;
-            }
-            return Clutter.EVENT_PROPAGATE;
-        });
-
-        const icon = new St.Icon({
-            icon_name: 'display-brightness-symbolic',
-            style_class: 'system-status-icon',
-        });
-        this.add_child(icon);
-
-        this._buildMenu();
-    }
-
-    _disconnectSliders() {
-        if (this._sliderSignals) {
-            for (const {slider, signalId} of this._sliderSignals) {
-                if (slider && signalId)
-                    slider.disconnect(signalId);
-            }
+    class BrightnessIndicator extends PanelMenu.Button {
+        _init(configHelper, extension) {
+            super._init(0.0, 'Brightness Manager', false);
+            this._configHelper = configHelper;
+            this._extension = extension;
+            this._configData = null;
+            this._debounceTimers = [];
             this._sliderSignals = [];
-        }
-    }
-
-    async _buildMenu() {
-        this.menu.addMenuItem(new PopupMenu.PopupMenuItem('Loading config...'));
-
-        this._configData = await this._configHelper.loadConfig();
-
-        this._disconnectSliders();
-        this.menu.removeAll();
-
-        if (!this._configData.monitors || this._configData.monitors.length === 0) {
-            this.menu.addMenuItem(
-                new PopupMenu.PopupMenuItem('No monitors found in config')
-            );
-            return;
-        }
-
-        for (const monitor of this._configData.monitors) {
-            const header = new PopupMenu.PopupMenuItem(
-                `[Display ${monitor.displayId}] ${monitor.id}`
-            );
-            header.sensitive = false;
-            this.menu.addMenuItem(header);
-
-            if (monitor.sliders) {
-                for (const sliderConfig of monitor.sliders) {
-                    const min = sliderConfig.min !== undefined
-                        ? sliderConfig.min : 0;
-                    const max = sliderConfig.max !== undefined
-                        ? sliderConfig.max : 100;
-                    const val = sliderConfig.lastValue !== undefined
-                        ? sliderConfig.lastValue : 50;
-
-                    const labelItem = new PopupMenu.PopupMenuItem(
-                        `${sliderConfig.name}`
-                    );
-                    labelItem.sensitive = false;
-                    this.menu.addMenuItem(labelItem);
-
-                    // GNOME sliders use 0.0 to 1.0 range
-                    const normalizedValue = (val - min) / (max - min);
-                    const sliderItem = new PopupMenu.PopupBaseMenuItem({
-                        activate: false,
-                    });
-                    const slider = new Slider(normalizedValue);
-                    slider.x_expand = true;
-                    sliderItem.add_child(slider);
-
-                    this.menu.addMenuItem(sliderItem);
-
-                    // Debouncer for this slider (0ms = immediate)
-                    const timer = new DebounceTimer(0, newValue => {
-                        const actualValue = Math.round(
-                            min + (newValue * (max - min))
-                        );
-                        sliderConfig.lastValue = actualValue;
-
-                        this._configHelper.executeCommand(
-                            sliderConfig.command,
-                            actualValue,
-                            this._configData.ddcutilPath
-                        );
+            this._isBuildingMenu = false;
+            this._rebuildQueued = false;
+            this._saveConfigDebouncer = new DebounceTimer(
+                CONFIG_SAVE_DEBOUNCE_MS,
+                () => {
+                    if (this._configData)
                         this._configHelper.saveConfig(this._configData);
-                    });
+                }
+            );
 
-                    this._debounceTimers.push(timer);
+            this.connect('button-press-event', (actor, event) => {
+                if (event.get_button() === 3 /* Right click */) {
+                    this._extension.openPreferences();
+                    return Clutter.EVENT_STOP;
+                }
+                return Clutter.EVENT_PROPAGATE;
+            });
 
-                    const signalId = slider.connect('notify::value', () => {
-                        timer.trigger(slider.value);
+            const icon = new St.Icon({
+                icon_name: 'display-brightness-symbolic',
+                style_class: 'system-status-icon',
+            });
+            this.add_child(icon);
+
+            this._buildMenu().catch(e => {
+                console.error(
+                    `[Brightness Controller] Menu initialization failed: ${e.message}`
+                );
+            });
+        }
+
+        _disconnectSliders() {
+            if (this._sliderSignals) {
+                for (const { slider, signalId } of this._sliderSignals) {
+                    if (slider && signalId)
+                        slider.disconnect(signalId);
+                }
+                this._sliderSignals = [];
+            }
+        }
+
+        async _buildMenu() {
+            if (this._isBuildingMenu) {
+                this._rebuildQueued = true;
+                return;
+            }
+
+            this._isBuildingMenu = true;
+            this.menu.addMenuItem(new PopupMenu.PopupMenuItem('Loading config...'));
+
+            try {
+                this._configData = await this._configHelper.loadConfig();
+
+                this._disconnectSliders();
+                this.menu.removeAll();
+
+                if (!this._configData.monitors || this._configData.monitors.length === 0) {
+                    this.menu.addMenuItem(
+                        new PopupMenu.PopupMenuItem('No monitors found in config')
+                    );
+                    return;
+                }
+
+                for (const monitor of this._configData.monitors) {
+                    const header = new PopupMenu.PopupMenuItem(
+                        `[Display ${monitor.displayId}] ${monitor.id}`
+                    );
+                    header.sensitive = false;
+                    this.menu.addMenuItem(header);
+
+                    if (monitor.sliders) {
+                        for (const sliderConfig of monitor.sliders) {
+                            const min = Number.isFinite(sliderConfig.min)
+                                ? sliderConfig.min : 0;
+                            const max = Number.isFinite(sliderConfig.max)
+                                ? sliderConfig.max : 100;
+                            const val = Number.isFinite(sliderConfig.lastValue)
+                                ? sliderConfig.lastValue : 50;
+                            const safeRange = max > min ? max - min : 1;
+                            const clampedVal = Math.min(max, Math.max(min, val));
+
+                            const labelItem = new PopupMenu.PopupMenuItem(
+                                `${sliderConfig.name}`
+                            );
+                            labelItem.sensitive = false;
+                            this.menu.addMenuItem(labelItem);
+
+                            // GNOME sliders use 0.0 to 1.0 range.
+                            const normalizedValue = (clampedVal - min) / safeRange;
+                            const sliderItem = new PopupMenu.PopupBaseMenuItem({
+                                activate: false,
+                            });
+                            const slider = new Slider(normalizedValue);
+                            slider.x_expand = true;
+                            sliderItem.add_child(slider);
+
+                            this.menu.addMenuItem(sliderItem);
+
+                            // Debounce slider updates to avoid flooding ddcutil and IO.
+                            const timer = new DebounceTimer(COMMAND_DEBOUNCE_MS, newValue => {
+                                const actualValue = Math.round(
+                                    min + (newValue * safeRange)
+                                );
+                                sliderConfig.lastValue = actualValue;
+
+                                this._configHelper.executeCommand(
+                                    sliderConfig.command,
+                                    actualValue,
+                                    this._configData.ddcutilPath
+                                );
+                                this._saveConfigDebouncer.trigger();
+                            });
+
+                            this._debounceTimers.push(timer);
+
+                            const signalId = slider.connect('notify::value', () => {
+                                timer.trigger(slider.value);
+                            });
+                            this._sliderSignals.push({ slider, signalId });
+                        }
+                    }
+                    this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+                }
+
+                const refreshItem = new PopupMenu.PopupMenuItem(
+                    'Refresh Monitors (ddcutil detect)'
+                );
+                refreshItem.connect('activate', async () => {
+                    this._disconnectSliders();
+                    this.menu.removeAll();
+                    this.menu.addMenuItem(
+                        new PopupMenu.PopupMenuItem('Running ddcutil detect...')
+                    );
+                    await this._configHelper._generateDefaultConfig();
+                    await this._buildMenu();
+                });
+                this.menu.addMenuItem(refreshItem);
+
+                this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+                const settingsItem = new PopupMenu.PopupMenuItem('⚙️ Settings');
+                settingsItem.connect('activate', () => {
+                    this._extension.openPreferences();
+                });
+                this.menu.addMenuItem(settingsItem);
+            } catch (e) {
+                this._disconnectSliders();
+                this.menu.removeAll();
+                this.menu.addMenuItem(
+                    new PopupMenu.PopupMenuItem('Failed to build menu. See shell logs.')
+                );
+                console.error(`[Brightness Controller] _buildMenu failed: ${e.message}`);
+            } finally {
+                this._isBuildingMenu = false;
+                if (this._rebuildQueued) {
+                    this._rebuildQueued = false;
+                    this._buildMenu().catch(e => {
+                        console.error(
+                            `[Brightness Controller] Queued rebuild failed: ${e.message}`
+                        );
                     });
-                    this._sliderSignals.push({slider, signalId});
                 }
             }
-            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         }
 
-        const refreshItem = new PopupMenu.PopupMenuItem('Refresh UI Config');
-        refreshItem.connect('activate', () => {
-            this._buildMenu();
-        });
-        this.menu.addMenuItem(refreshItem);
-
-        const detectItem = new PopupMenu.PopupMenuItem(
-            'Reload Monitors (ddcutil detect)'
-        );
-        detectItem.connect('activate', async () => {
+        destroy() {
             this._disconnectSliders();
-            this.menu.removeAll();
-            this.menu.addMenuItem(
-                new PopupMenu.PopupMenuItem('Running ddcutil detect...')
-            );
-            await this._configHelper._generateDefaultConfig();
-            this._buildMenu();
-        });
-        this.menu.addMenuItem(detectItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        const settingsItem = new PopupMenu.PopupMenuItem('⚙️ Settings');
-        settingsItem.connect('activate', () => {
-            this._extension.openPreferences();
-        });
-        this.menu.addMenuItem(settingsItem);
-    }
-
-    destroy() {
-        this._disconnectSliders();
-        for (const timer of this._debounceTimers) {
-            timer.destroy();
+            for (const timer of this._debounceTimers) {
+                timer.destroy();
+            }
+            this._debounceTimers = [];
+            this._saveConfigDebouncer.destroy();
+            super.destroy();
         }
-        this._debounceTimers = [];
-        super.destroy();
-    }
-});
+    });
 
 
 /**
